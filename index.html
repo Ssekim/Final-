@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Binance Arbitrage Bot</title>
+  <!-- Chart.js & TensorFlow.js Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.0.0/dist/tf.min.js"></script>
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron&family=Poppins:wght@300;400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <h2>🚀 Binance Arbitrage Opportunities</h2>
+  <div class="controls">
+    <label>Filter: <input type="text" id="filterInput" placeholder="e.g. BTCUSDT"></label>
+  </div>
+  <p>Scanning...<span id="loadingSpinner" class="spinner"></span></p>
+
+  <table id="arbitrageTable" data-sort-dir="desc">
+    <thead>
+      <tr>
+        <th data-col="0">Opportunity</th>
+        <th data-col="1">Profit (%)</th>
+        <th data-col="2">Status</th>
+        <th data-col="3">Liquidity</th>
+        <th data-col="4">Exec Prices</th>
+        <th data-col="5">AI Score</th>
+        <th data-col="6">Advice</th>
+      </tr>
+    </thead>
+    <tbody id="results">
+      <tr><td colspan="7">Loading...</td></tr>
+    </tbody>
+  </table>
+
+  <canvas id="profitChart"></canvas>
+  <p id="errorMessage" class="error"></p>
+
+  <script src="script.js"></script>
+</body>
+</html>
