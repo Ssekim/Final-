@@ -145,6 +145,7 @@ class ArbitrageExecutor:
                 return False
             
             # Step 2: First Asset -> Second Asset (e.g., BTC -> ETH)
+            # Use the actual filled quantity from step 1
             received_quantity = step1_execution.fill_quantity or step1_quantity
             step2_quantity = received_quantity
             step2_execution = await self._execute_trade(
@@ -161,7 +162,9 @@ class ArbitrageExecutor:
                 return False
             
             # Step 3: Second Asset -> USDT (e.g., ETH -> USDT)
-            received_quantity2 = step2_execution.fill_quantity or (step2_quantity * opportunity.execution_prices[1])
+            # For step 2, if we sold BTC for ETH, we receive ETH (not BTC * price)
+            # The fill_quantity for step 2 should be the amount of the quote currency received
+            received_quantity2 = step2_execution.fill_quantity or step2_quantity
             step3_quantity = received_quantity2
             step3_execution = await self._execute_trade(
                 TradeStep.STEP_3,
@@ -200,12 +203,18 @@ class ArbitrageExecutor:
                 execution.fill_price = expected_price
                 execution.fill_quantity = quantity
                 execution.status = "filled"
-                execution.commission = quantity * expected_price * TAKER_FEE
+                # Commission calculation: for BUY orders, commission on base asset; for SELL orders, commission on quote asset
+                if side == "BUY":
+                    execution.commission = quantity * TAKER_FEE  # Commission in base asset
+                else:
+                    execution.commission = quantity * expected_price * TAKER_FEE  # Commission in quote asset (USDT)
                 execution.price = expected_price
                 return execution
             
             # Get current market price
-            ticker = self.client.get_symbol_ticker(symbol=symbol)
+            import asyncio
+            loop = asyncio.get_event_loop()
+            ticker = await loop.run_in_executor(None, self.client.get_symbol_ticker, symbol)
             current_price = float(ticker['price'])
             
             # Calculate slippage
@@ -218,13 +227,17 @@ class ArbitrageExecutor:
                 return execution
             
             # Place market order for immediate execution
-            order = self.client.order_market(
-                symbol=symbol,
-                side=side,
-                quantity=self._format_quantity(symbol, quantity)
+            formatted_qty = self._format_quantity(symbol, quantity)
+            order = await loop.run_in_executor(
+                None, 
+                lambda: self.client.order_market(
+                    symbol=symbol,
+                    side=side,
+                    quantity=formatted_qty
+                )
             )
             
-            execution.order_id = order['orderId']
+            execution.order_id = str(order['orderId'])
             execution.fill_price = float(order.get('price', current_price))
             execution.fill_quantity = float(order.get('executedQty', quantity))
             execution.status = order['status'].lower()
@@ -259,6 +272,7 @@ class ArbitrageExecutor:
     def _format_quantity(self, symbol: str, quantity: float) -> str:
         """Format quantity according to symbol's lot size requirements"""
         try:
+            # This method stays sync as it's called from sync context
             info = self.client.get_symbol_info(symbol)
             lot_size_filter = next(f for f in info['filters'] if f['filterType'] == 'LOT_SIZE')
             step_size = float(lot_size_filter['stepSize'])
@@ -277,24 +291,37 @@ class ArbitrageExecutor:
         """Calculate the actual profit from the execution"""
         try:
             if len(result.executions) != 3:
+                logger.warning(f"Expected 3 executions, got {len(result.executions)}")
                 return
             
             # Calculate total fees
             total_fees = sum(ex.commission or 0.0 for ex in result.executions)
             result.total_fees_usdt = total_fees
             
-            # Calculate final USDT received
+            # Calculate final USDT received from the last execution
             final_execution = result.executions[-1]
-            final_usdt_received = (final_execution.fill_quantity or 0.0) * (final_execution.fill_price or 0.0)
+            if final_execution.fill_quantity is None or final_execution.fill_price is None:
+                logger.warning("Missing fill data for final execution, cannot calculate profit")
+                return
+                
+            final_usdt_received = final_execution.fill_quantity * final_execution.fill_price
             
             # Calculate profit
             initial_usdt = result.position_size_usdt
             result.actual_profit_usdt = final_usdt_received - initial_usdt - total_fees
-            result.actual_profit_percent = (result.actual_profit_usdt / initial_usdt) * 100
+            
+            # Avoid division by zero
+            if initial_usdt > 0:
+                result.actual_profit_percent = (result.actual_profit_usdt / initial_usdt) * 100
+            else:
+                result.actual_profit_percent = 0.0
             
             # Calculate slippage
             expected_final_usdt = initial_usdt * (1 + result.opportunity.profit_percent / 100)
-            result.slippage_percent = ((expected_final_usdt - final_usdt_received) / expected_final_usdt) * 100
+            if expected_final_usdt > 0:
+                result.slippage_percent = ((expected_final_usdt - final_usdt_received) / expected_final_usdt) * 100
+            else:
+                result.slippage_percent = 0.0
             
         except Exception as e:
             logger.error(f"Profit calculation error: {str(e)}")
@@ -317,7 +344,10 @@ class ArbitrageExecutor:
     async def get_account_balances(self) -> List[AccountBalance]:
         """Get current account balances"""
         try:
-            account_info = self.client.get_account()
+            # Run sync Binance API call in thread pool
+            import asyncio
+            loop = asyncio.get_event_loop()
+            account_info = await loop.run_in_executor(None, self.client.get_account)
             balances = []
             
             for balance in account_info['balances']:
@@ -368,10 +398,14 @@ class ArbitrageExecutor:
         for execution in result.executions:
             if execution.order_id and execution.status == "pending":
                 try:
-                    self.client.cancel_order(
-                        symbol=execution.symbol,
-                        orderId=execution.order_id
-                    )
+                    import asyncio
+                    loop = asyncio.get_event_loop()
+                    def cancel_order():
+                        return self.client.cancel_order(
+                            symbol=execution.symbol,
+                            orderId=execution.order_id
+                        )
+                    await loop.run_in_executor(None, cancel_order)
                     execution.status = "cancelled"
                 except Exception as e:
                     logger.error(f"Error cancelling order {execution.order_id}: {str(e)}")

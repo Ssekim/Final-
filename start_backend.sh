@@ -46,4 +46,4 @@ echo "Press Ctrl+C to stop the server"
 echo ""
 
 # Start the server
-python main.py
+python3 main.py

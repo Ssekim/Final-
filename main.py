@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 import logging
 import asyncio
 from typing import List, Dict
@@ -20,11 +21,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Global executor instance
+executor = ArbitrageExecutor()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting Binance Arbitrage Execution API")
+    logger.info(f"Testnet mode: {settings.BINANCE_TESTNET}")
+    logger.info(f"Max position size: ${settings.MAX_POSITION_SIZE_USDT}")
+    yield
+    # Shutdown
+    logger.info("Shutting down Binance Arbitrage Execution API")
+
 # Initialize FastAPI app
 app = FastAPI(
     title="Binance Arbitrage Execution API",
     description="Backend API for executing triangular arbitrage opportunities on Binance",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Add CORS middleware
@@ -35,16 +50,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Global executor instance
-executor = ArbitrageExecutor()
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize the application on startup"""
-    logger.info("Starting Binance Arbitrage Execution API")
-    logger.info(f"Testnet mode: {settings.BINANCE_TESTNET}")
-    logger.info(f"Max position size: ${settings.MAX_POSITION_SIZE_USDT}")
 
 @app.get("/")
 async def root():
@@ -73,10 +78,13 @@ async def execute_arbitrage(request: ExecutionRequest, background_tasks: Backgro
         result = await executor.execute_arbitrage(request)
         
         if result.status.value == "completed":
+            profit_msg = ""
+            if result.actual_profit_percent is not None:
+                profit_msg = f" Profit: {result.actual_profit_percent:.2f}%"
             return ExecutionResponse(
                 success=True,
                 execution_id=result.execution_id,
-                message=f"Arbitrage executed successfully. Profit: {result.actual_profit_percent:.2f}%",
+                message=f"Arbitrage executed successfully.{profit_msg}",
                 result=result
             )
         else:
@@ -202,9 +210,12 @@ async def health_check():
         }
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}")
+        # Return unhealthy status but don't raise exception
         return {
             "status": "unhealthy",
+            "binance_connection": "failed", 
             "error": str(e),
+            "testnet": settings.BINANCE_TESTNET,
             "timestamp": str(datetime.now())
         }
 
@@ -225,10 +236,14 @@ async def get_config():
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     logger.error(f"Global exception: {str(exc)}")
-    return {
-        "error": "Internal server error",
-        "detail": str(exc) if settings.BINANCE_TESTNET else "An error occurred"
-    }
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "detail": str(exc) if settings.BINANCE_TESTNET else "An error occurred"
+        }
+    )
 
 if __name__ == "__main__":
     uvicorn.run(

@@ -14,23 +14,29 @@ A Python backend service for executing triangular arbitrage opportunities on Bin
 
 ## Quick Start
 
-### 1. Install Dependencies
+### 1. Validate Setup
 
 ```bash
-pip install -r requirements.txt
+python3 validate_setup.py
 ```
 
-### 2. Configure API Keys
+### 2. Install Dependencies
+
+```bash
+pip3 install -r requirements.txt
+```
+
+### 3. Configure API Keys
 
 ```bash
 cp .env.example .env
 # Edit .env with your Binance API credentials
 ```
 
-### 3. Run the Server
+### 4. Run the Server
 
 ```bash
-python main.py
+python3 main.py
 ```
 
 The API will be available at `http://localhost:8000`

@@ -1,6 +1,9 @@
 import os
 from typing import Optional
-from pydantic import BaseSettings
+try:
+    from pydantic_settings import BaseSettings
+except ImportError:
+    from pydantic import BaseSettings
 
 class Settings(BaseSettings):
     # Binance API Configuration

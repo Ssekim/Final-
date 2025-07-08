@@ -9,7 +9,7 @@ This script demonstrates how to:
 4. Check account balances and risk metrics
 
 Usage:
-    python client_example.py
+    python3 client_example.py
 """
 
 import requests
